@@ -3,9 +3,9 @@ package derperer
 import (
 	"fmt"
 	"github.com/gofiber/fiber/v2"
-	"github.com/sourcegraph/conc/pool"
 	"github.com/koyangyang/derperer/fofa"
 	"github.com/koyangyang/derperer/speedtest"
+	"github.com/sourcegraph/conc/pool"
 	"go.uber.org/zap"
 	"net"
 	"net/url"
@@ -205,11 +205,6 @@ func (d *Map) SortTopKDERPMap(k int) (*DERPResult, error) {
 		return regionsWithBandwidth[i].bandwidth > regionsWithBandwidth[j].bandwidth
 	})
 
-	// 限制前K个
-	if k > 0 && k < len(regionsWithBandwidth) {
-		regionsWithBandwidth = regionsWithBandwidth[:k]
-	}
-
 	// 创建结果
 	result := &DERPResult{
 		Regions: make(map[int]*DERPRegionR),
@@ -217,9 +212,14 @@ func (d *Map) SortTopKDERPMap(k int) (*DERPResult, error) {
 
 	// 重新分配RegionID并添加到结果
 	newMapId := 900
+	endMapId := newMapId + k
 	for _, item := range regionsWithBandwidth {
+		if newMapId >= endMapId {
+			break // 如果已经达到K个节点，则停止添加
+		}
 		r := item.region
 
+		rBandWidth := r.Bandwidth
 		// 删除指定字段
 		r.Bandwidth = ""
 		r.Status = DERPRegionStatusUnknown // 重置状态
@@ -254,7 +254,7 @@ func (d *Map) SortTopKDERPMap(k int) (*DERPResult, error) {
 			nr.Nodes[i] = &DERPNodeR{
 				Name:             strconv.Itoa(newMapId),
 				RegionID:         newMapId,
-				HostName:         node.HostName,
+				HostName:         node.HostName + rBandWidth,
 				CertName:         node.CertName,
 				IPv4:             node.IPv4,
 				IPv6:             node.IPv6,
