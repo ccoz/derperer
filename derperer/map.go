@@ -241,7 +241,7 @@ func (d *Map) SortTopKDERPMap(k int) (*DERPResult, error) {
 		nr := &DERPRegionR{
 			RegionID:   newMapId,
 			RegionCode: RegionName,
-			RegionName: RegionName,
+			RegionName: RegionName + "-" + rBandWidth,
 			Avoid:      r.Avoid,
 			Nodes:      make([]*DERPNodeR, len(r.Nodes)),
 		}
@@ -254,7 +254,7 @@ func (d *Map) SortTopKDERPMap(k int) (*DERPResult, error) {
 			nr.Nodes[i] = &DERPNodeR{
 				Name:             strconv.Itoa(newMapId),
 				RegionID:         newMapId,
-				HostName:         node.HostName + rBandWidth,
+				HostName:         node.HostName,
 				CertName:         node.CertName,
 				IPv4:             node.IPv4,
 				IPv6:             node.IPv6,
