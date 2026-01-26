@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/koyangyang/derperer/derperer"
-	"github.com/koyangyang/derperer/fofa"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -14,9 +13,7 @@ import (
 )
 
 var (
-	derpererConfig = derperer.DerpererConfig{
-		FofaClient: fofa.Fofa{},
-	}
+	derpererConfig = derperer.DerpererConfig{}
 )
 
 var serverCmd = &cobra.Command{
@@ -35,9 +32,6 @@ func init() {
 
 	rootCmd.AddCommand(serverCmd)
 
-	serverCmd.Flags().String("config.FofaClient.Email", "", "fofa email")
-	serverCmd.Flags().String("config.FofaClient.Key", "", "fofa key")
-	serverCmd.Flags().Int("config.FetchBatch", 100, "batch")
 	serverCmd.Flags().Duration("config.FetchInterval", 24*time.Hour, "fetch interval")
 	serverCmd.Flags().String("config.Address", ":8080", "address")
 	serverCmd.Flags().Duration("config.DERPMapPolicy.RecheckInterval", time.Hour, "update interval")

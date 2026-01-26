@@ -1,14 +1,10 @@
 config:
-  # Fofa client configuration
-  FofaClient:
-    Email:  # fofa email
-    Key:    # fofa key
+  # Data source: data/result.json
   AdminToken:           # admin token
   Address: :8080               # Service listening address (default: ":8080")
   DataPath: /data               # Data storage path (default: "./data")
   Account:                     # Tailscale account
   ApiKey:                      # Tailscale apikey
-  FetchBatch: 100                # Batch fetch count (default: 100)
   FetchInterval: 6h0m0s          # Fetch interval (default: 24h0m0s)
   DeleteInterval: 24h0m0s         # Delete interval
   UpdateInterval: 4h0m0s         # Tailscale ACL update interval

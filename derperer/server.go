@@ -1,8 +1,11 @@
 package derperer
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -18,8 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const FINGERPRINT = `"<h1>DERP</h1>"`
-
 type Derperer struct {
 	config     DerpererConfig
 	app        *fiber.App
@@ -32,8 +33,6 @@ type DerpererConfig struct {
 	Address        string
 	AdminToken     string
 	FetchInterval  time.Duration
-	FetchBatch     int
-	FofaClient     fofa.Fofa
 	DERPMapPolicy  DERPMapPolicy
 	DataPath       string
 	Account        string
@@ -49,10 +48,6 @@ func NewDerperer(config DerpererConfig) (*Derperer, error) {
 	p, err := persistent.NewPersistent(config.DataPath)
 	if err != nil {
 		return nil, err
-	}
-
-	if config.FofaClient.Email == "" || config.FofaClient.Key == "" {
-		return nil, fmt.Errorf("fofa email and key must be set")
 	}
 
 	derperer := &Derperer{
@@ -95,9 +90,88 @@ func NewDerperer(config DerpererConfig) (*Derperer, error) {
 	return derperer, nil
 }
 
+// LocalDataRecord 本地数据文件的记录结构
+type LocalDataRecord struct {
+	BaseProtocol   string `json:"base_protocol"`
+	ASOrganization string `json:"as_organization"`
+	City           string `json:"city"`
+	Country        string `json:"country"`
+	Host           string `json:"host"`
+	IP             string `json:"ip"`
+	Port           string `json:"port"`
+	Region         string `json:"region"`
+}
+
+// ToFofaResult 转换为 FofaResult 格式
+func (r *LocalDataRecord) ToFofaResult() fofa.FofaResult {
+	// 从 host 中推断 protocol
+	protocol := "http"
+	if strings.HasPrefix(r.Host, "https://") {
+		protocol = "https"
+	}
+
+	return fofa.FofaResult{
+		IP:             r.IP,
+		Port:           r.Port,
+		Host:           r.Host,
+		Protocol:       protocol,
+		Country:        r.Country,
+		Region:         r.Region,
+		City:           r.City,
+		ASOrganization: r.ASOrganization,
+	}
+}
+
+func (d *Derperer) LoadDataFromFile() error {
+	logger := zap.L()
+	logger.Info("loading data from file", zap.String("path", "data/result.json"))
+
+	file, err := os.Open("data/result.json")
+	if err != nil {
+		return fmt.Errorf("failed to open data file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		var record LocalDataRecord
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			logger.Error("failed to parse json line", zap.Error(err), zap.String("line", scanner.Text()))
+			continue
+		}
+
+		fofaResult := record.ToFofaResult()
+		if err := d.derpMap.AddFofaResult(fofaResult); err != nil {
+			logger.Debug("failed to add result", zap.Error(err), zap.String("host", record.Host))
+			continue
+		}
+		count++
+
+		// 定期保存进度
+		if count%10 == 0 {
+			if err := d.persistent.Save("derp_map", d.derpMap); err != nil {
+				logger.Error("failed to save derp_map", zap.Error(err))
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading file: %w", err)
+	}
+
+	// 最终保存
+	if err := d.persistent.Save("derp_map", d.derpMap); err != nil {
+		logger.Error("failed to save derp_map", zap.Error(err))
+	}
+
+	logger.Info("finished loading data from file", zap.Int("count", count))
+	return nil
+}
+
 func (d *Derperer) RemoveFofaData() {
 	logger := zap.L()
-	logger.Info("removing fofa data")
+	logger.Info("removing data")
 	if err := d.persistent.Delete("derp_map"); err != nil {
 		logger.Error("failed to delete derp_map", zap.Error(err))
 	}
@@ -107,23 +181,9 @@ func (d *Derperer) RemoveFofaData() {
 
 func (d *Derperer) FetchFofaData() {
 	logger := zap.L()
-	logger.Info("fetching fofa")
-	res, finish, err := d.config.FofaClient.Query(FINGERPRINT, d.config.FetchBatch, -1)
-	if err != nil {
-		logger.Error("failed to query fofa", zap.Error(err))
-	}
-	for {
-		select {
-		case r := <-res:
-			d.derpMap.AddFofaResult(r)
-
-			if err := d.persistent.Save("derp_map", d.derpMap); err != nil {
-				logger.Error("failed to save derp_map", zap.Error(err))
-			}
-		case <-finish:
-			logger.Info("fofa query finished")
-			return
-		}
+	logger.Info("loading data from local file")
+	if err := d.LoadDataFromFile(); err != nil {
+		logger.Error("failed to load data from file", zap.Error(err))
 	}
 }
 
