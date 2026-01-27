@@ -59,7 +59,9 @@ func NewDerperer(config DerpererConfig) (*Derperer, error) {
 	}
 
 	if err := derperer.persistent.Load("derp_map", derperer.derpMap); err != nil {
-		zap.L().Error("failed to load derp_map", zap.Error(err))
+		zap.L().Warn("failed to load derp_map from persistent storage, will load from data/result.json", zap.Error(err))
+		// 首次启动或数据丢失，立即从本地文件加载数据
+		derperer.FetchFofaData()
 	}
 
 	app.Get("/swagger/*", swagger.HandlerDefault)
