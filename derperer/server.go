@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -126,9 +127,10 @@ func (r *LocalDataRecord) ToFofaResult() fofa.FofaResult {
 
 func (d *Derperer) LoadDataFromFile() error {
 	logger := zap.L()
-	logger.Info("loading data from file", zap.String("path", "data/result.json"))
+	filePath := filepath.Join(d.config.DataPath, "result.json")
+	logger.Info("loading data from file", zap.String("path", filePath))
 
-	file, err := os.Open("data/result.json")
+	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open data file: %w", err)
 	}
