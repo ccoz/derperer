@@ -2,7 +2,6 @@ package derperer
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,7 +15,6 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/swagger"
 	_ "github.com/koyangyang/derperer/docs"
-	"github.com/koyangyang/derperer/fofa"
 	"github.com/koyangyang/derperer/persistent"
 	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
@@ -25,75 +23,34 @@ import (
 type Derperer struct {
 	config     DerpererConfig
 	app        *fiber.App
-	ctx        context.Context
 	derpMap    *Map
 	persistent *persistent.Persistent
 }
 
 type DerpererConfig struct {
-	Address        string
-	AdminToken     string
-	FetchInterval  time.Duration
-	DERPMapPolicy  DERPMapPolicy
-	DataPath       string
-	Account        string
-	ApiKey         string
-	UpdateInterval time.Duration
-	DeleteInterval time.Duration
+	Address        string        `json:"address"`
+	AdminToken     string        `json:"adminToken"`
+	FetchInterval  time.Duration `json:"fetchInterval"`
+	DERPMapPolicy  DERPMapPolicy `json:"derpMapPolicy"`
+	DataPath       string        `json:"dataPath"`
+	Account        string        `json:"account"`
+	ApiKey         string        `json:"apiKey"`
+	UpdateInterval time.Duration `json:"updateInterval"`
+	DeleteInterval time.Duration `json:"deleteInterval"`
 }
 
-func NewDerperer(config DerpererConfig) (*Derperer, error) {
-	app := fiber.New()
-	ctx := context.Background()
-
-	p, err := persistent.NewPersistent(config.DataPath)
-	if err != nil {
-		return nil, err
-	}
-
-	derperer := &Derperer{
-		config:     config,
-		app:        app,
-		ctx:        ctx,
-		derpMap:    NewMap(&config.DERPMapPolicy),
-		persistent: p,
-	}
-
-	if err := derperer.persistent.Load("derp_map", derperer.derpMap); err != nil {
-		zap.L().Warn("failed to load derp_map from persistent storage, will load from data/result.json", zap.Error(err))
-		// 首次启动或数据丢失，立即从本地文件加载数据
-		derperer.FetchFofaData()
-	}
-
-	app.Get("/swagger/*", swagger.HandlerDefault)
-
-	app.Get("/", derperer.index)
-
-	app.Get("/derp.json", derperer.getDerp)
-	app.Get("/derp_sort.json", derperer.sortDerp)
-	app.Get("/update", derperer.updateTailscale)
-
-	if config.AdminToken != "" {
-		adminApi := app.Group("/admin", basicauth.New(basicauth.Config{
-			Users: map[string]string{
-				"admin": config.AdminToken,
-			},
-		}))
-
-		adminApi.Get("/", derperer.adminIndex)
-
-		adminApi.Get("/monitor", monitor.New())
-		adminApi.Use(pprof.New(pprof.Config{
-			Prefix: "/admin",
-		}))
-		adminApi.Get("/config", derperer.getConfig)
-		adminApi.Post("/config", derperer.setConfig)
-	}
-
-	return derperer, nil
+type DERPCandidate struct {
+	IP             string `json:"ip"`
+	Port           string `json:"port"`
+	Host           string `json:"host"`
+	Protocol       string `json:"protocol"`
+	Country        string `json:"country"`
+	Region         string `json:"region"`
+	City           string `json:"city"`
+	ASOrganization string `json:"as_organization"`
 }
 
-// LocalDataRecord 本地数据文件的记录结构
+// LocalDataRecord represents one line in DataPath/result.json.
 type LocalDataRecord struct {
 	BaseProtocol   string `json:"base_protocol"`
 	ASOrganization string `json:"as_organization"`
@@ -105,18 +62,73 @@ type LocalDataRecord struct {
 	Region         string `json:"region"`
 }
 
-// ToFofaResult 转换为 FofaResult 格式
-func (r *LocalDataRecord) ToFofaResult() fofa.FofaResult {
-	// 从 host 中推断 protocol
-	protocol := "http"
-	if strings.HasPrefix(r.Host, "https://") {
-		protocol = "https"
+func NewDerperer(config DerpererConfig) (*Derperer, error) {
+	app := fiber.New()
+
+	p, err := persistent.NewPersistent(config.DataPath)
+	if err != nil {
+		return nil, err
 	}
 
-	return fofa.FofaResult{
+	derperer := &Derperer{
+		config:     config,
+		app:        app,
+		derpMap:    NewMap(&config.DERPMapPolicy),
+		persistent: p,
+	}
+
+	if err := derperer.persistent.Load("derp_map", derperer.derpMap); err != nil {
+		zap.L().Warn("failed to load derp_map from persistent storage, will rebuild from result.json", zap.Error(err))
+		derperer.LoadSourceData()
+	}
+
+	app.Get("/swagger/*", swagger.HandlerDefault)
+
+	app.Get("/", derperer.index)
+	app.Get("/derp.json", derperer.getDerp)
+	app.Get("/derp_sort.json", derperer.sortDerp)
+	app.Get("/update", derperer.updateTailscale)
+
+	if config.AdminToken != "" {
+		adminAPI := app.Group("/admin", basicauth.New(basicauth.Config{
+			Users: map[string]string{
+				"admin": config.AdminToken,
+			},
+		}))
+
+		adminAPI.Get("/", derperer.adminIndex)
+		adminAPI.Get("/monitor", monitor.New())
+		adminAPI.Use(pprof.New(pprof.Config{
+			Prefix: "/admin",
+		}))
+		adminAPI.Get("/config", derperer.getConfig)
+		adminAPI.Post("/config", derperer.setConfig)
+	}
+
+	return derperer, nil
+}
+
+// ToDERPCandidate normalizes a raw result.json line into a candidate node.
+func (r *LocalDataRecord) ToDERPCandidate() DERPCandidate {
+	protocol := strings.ToLower(strings.TrimSpace(r.BaseProtocol))
+	if protocol == "" {
+		protocol = "http"
+	}
+	if strings.HasPrefix(r.Host, "https://") {
+		protocol = "https"
+	} else if strings.HasPrefix(r.Host, "http://") {
+		protocol = "http"
+	}
+
+	host := r.Host
+	if !strings.Contains(host, "://") {
+		host = protocol + "://" + host
+	}
+
+	return DERPCandidate{
 		IP:             r.IP,
 		Port:           r.Port,
-		Host:           r.Host,
+		Host:           host,
 		Protocol:       protocol,
 		Country:        r.Country,
 		Region:         r.Region,
@@ -145,14 +157,14 @@ func (d *Derperer) LoadDataFromFile() error {
 			continue
 		}
 
-		fofaResult := record.ToFofaResult()
-		if err := d.derpMap.AddFofaResult(fofaResult); err != nil {
+		candidate := record.ToDERPCandidate()
+		if err := d.derpMap.AddCandidate(candidate); err != nil {
 			logger.Debug("failed to add result", zap.Error(err), zap.String("host", record.Host))
 			continue
 		}
 		count++
 
-		// 定期保存进度
+		// Persist progress periodically when importing large files.
 		if count%10 == 0 {
 			if err := d.persistent.Save("derp_map", d.derpMap); err != nil {
 				logger.Error("failed to save derp_map", zap.Error(err))
@@ -164,7 +176,6 @@ func (d *Derperer) LoadDataFromFile() error {
 		return fmt.Errorf("error reading file: %w", err)
 	}
 
-	// 最终保存
 	if err := d.persistent.Save("derp_map", d.derpMap); err != nil {
 		logger.Error("failed to save derp_map", zap.Error(err))
 	}
@@ -173,17 +184,17 @@ func (d *Derperer) LoadDataFromFile() error {
 	return nil
 }
 
-func (d *Derperer) RemoveFofaData() {
+func (d *Derperer) ResetSourceData() {
 	logger := zap.L()
-	logger.Info("removing data")
+	logger.Info("resetting cached derp map")
 	if err := d.persistent.Delete("derp_map"); err != nil {
 		logger.Error("failed to delete derp_map", zap.Error(err))
 	}
 	d.derpMap = NewMap(&d.config.DERPMapPolicy)
-	d.FetchFofaData()
+	d.LoadSourceData()
 }
 
-func (d *Derperer) FetchFofaData() {
+func (d *Derperer) LoadSourceData() {
 	logger := zap.L()
 	logger.Info("loading data from local file")
 	if err := d.LoadDataFromFile(); err != nil {
@@ -204,7 +215,7 @@ func (d *Derperer) Start() {
 			}
 
 			<-time.After(d.config.FetchInterval - time.Since(lastFetch))
-			d.FetchFofaData()
+			d.LoadSourceData()
 
 			if err := d.persistent.Save("last_fetch", time.Now()); err != nil {
 				zap.L().Error("failed to save last_fetch", zap.Error(err))
@@ -235,8 +246,8 @@ func (d *Derperer) Start() {
 				zap.L().Error("failed to load last_delete", zap.Error(err))
 			}
 
-			<-time.After(d.config.FetchInterval - time.Since(lastFetch))
-			d.RemoveFofaData()
+			<-time.After(d.config.DeleteInterval - time.Since(lastFetch))
+			d.ResetSourceData()
 
 			if err := d.persistent.Save("last_delete", time.Now()); err != nil {
 				zap.L().Error("failed to save last_delete", zap.Error(err))
@@ -245,7 +256,9 @@ func (d *Derperer) Start() {
 	})
 
 	wg.Go(func() {
-		d.app.Listen(d.config.Address)
+		if err := d.app.Listen(d.config.Address); err != nil {
+			zap.L().Fatal("failed to listen", zap.Error(err))
+		}
 	})
 
 	wg.Wait()
@@ -264,10 +277,12 @@ func (d *Derperer) index(c *fiber.Ctx) error {
 }
 
 // @Summary Get DERP Map
-// @Param status query string false "alive|error|all" Enums(alive, error, all)
+// @Param all query boolean false "return all regions without filtering"
+// @Param status query string false "alive|error|unknown" Enums(alive, error, unknown)
 // @Param latency-limit query string false "latency limit, e.g. 500ms"
-// @Param bandwidth-limit query string string "bandwidth limit, e.g. 2Mbps"
+// @Param bandwidth-limit query string false "bandwidth limit, e.g. 2Mbps"
 // @Produce json
+// @Success 200 {object} derperer.DERPMap
 // @Router /derp.json [get]
 func (d *Derperer) getDerp(c *fiber.Ctx) error {
 	var filter DERPMapFilter
@@ -281,6 +296,10 @@ func (d *Derperer) getDerp(c *fiber.Ctx) error {
 	return c.JSON(m)
 }
 
+// @Summary Get Top DERP Regions
+// @Produce json
+// @Success 200 {object} derperer.DERPResult
+// @Router /derp_sort.json [get]
 func (d *Derperer) sortDerp(c *fiber.Ctx) error {
 	m, err := d.derpMap.SortTopKDERPMap(20)
 	if err != nil {
@@ -289,6 +308,10 @@ func (d *Derperer) sortDerp(c *fiber.Ctx) error {
 	return c.JSON(m)
 }
 
+// @Summary Update Tailscale ACL
+// @Produce json
+// @Success 200 {string} string
+// @Router /update [get]
 func (d *Derperer) updateTailscale(c *fiber.Ctx) error {
 	m, err := d.derpMap.SortTopKDERPMap(20)
 	if err != nil {
@@ -325,6 +348,7 @@ func (d *Derperer) adminIndex(c *fiber.Ctx) error {
 // @Summary Get Server Config
 // @Produce json
 // @Security BasicAuth
+// @Success 200 {object} derperer.DerpererConfig
 // @Router /admin/config [get]
 func (d *Derperer) getConfig(c *fiber.Ctx) error {
 	return c.JSON(d.config)
@@ -335,6 +359,7 @@ func (d *Derperer) getConfig(c *fiber.Ctx) error {
 // @Param config body derperer.DerpererConfig true "config"
 // @Produce json
 // @Security BasicAuth
+// @Success 200 {object} derperer.DerpererConfig
 // @Router /admin/config [post]
 func (d *Derperer) setConfig(c *fiber.Ctx) error {
 	if err := c.BodyParser(&d.config); err != nil {

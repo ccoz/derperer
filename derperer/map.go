@@ -2,11 +2,6 @@ package derperer
 
 import (
 	"fmt"
-	"github.com/gofiber/fiber/v2"
-	"github.com/koyangyang/derperer/fofa"
-	"github.com/koyangyang/derperer/speedtest"
-	"github.com/sourcegraph/conc/pool"
-	"go.uber.org/zap"
 	"net"
 	"net/url"
 	"regexp"
@@ -14,17 +9,22 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/koyangyang/derperer/speedtest"
+	"github.com/sourcegraph/conc/pool"
+	"go.uber.org/zap"
 )
 
 type DERPMapPolicy struct {
 	// RecheckInterval is the interval to recheck a abandoned node.
-	RecheckInterval time.Duration
+	RecheckInterval time.Duration `json:"recheckInterval"`
 
-	CheckDuration time.Duration
+	CheckDuration time.Duration `json:"checkDuration"`
 
-	TestConcurrency int
+	TestConcurrency int `json:"testConcurrency"`
 
-	BaselineBandwidth float64
+	BaselineBandwidth float64 `json:"baselineBandwidth"`
 }
 
 type Map struct {
@@ -333,15 +333,15 @@ func (d *Map) Recheck() {
 	}
 }
 
-func (d *Map) buildNode(result fofa.FofaResult) (*DERPNode, error) {
-	url, err := url.Parse(result.Host)
+func (d *Map) buildNode(candidate DERPCandidate) (*DERPNode, error) {
+	url, err := url.Parse(candidate.Host)
 	if err != nil {
 		return nil, err
 	}
 
 	host := url.Hostname()
-	ip := result.IP
-	port, err := strconv.Atoi(result.Port)
+	ip := candidate.IP
+	port, err := strconv.Atoi(candidate.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -376,12 +376,12 @@ func (d *Map) buildNode(result fofa.FofaResult) (*DERPNode, error) {
 	return node, nil
 }
 
-func (d *Map) AddFofaResult(result fofa.FofaResult) error {
-	if result.Protocol != "https" {
+func (d *Map) AddCandidate(candidate DERPCandidate) error {
+	if candidate.Protocol != "https" {
 		return nil
 	}
 
-	node, err := d.buildNode(result)
+	node, err := d.buildNode(candidate)
 	if err != nil {
 		return err
 	}
@@ -394,17 +394,17 @@ func (d *Map) AddFofaResult(result fofa.FofaResult) error {
 	regionID := d.nextRegionID.Load()
 	d.nextRegionID.Add(1)
 
-	code := result.Country
-	if result.Region != "" {
-		code += fmt.Sprintf("-%s", result.Region)
+	code := candidate.Country
+	if candidate.Region != "" {
+		code += fmt.Sprintf("-%s", candidate.Region)
 	}
-	if result.City != "" {
-		code += fmt.Sprintf("-%s", result.City)
+	if candidate.City != "" {
+		code += fmt.Sprintf("-%s", candidate.City)
 	}
-	if result.ASOrganization != "" {
-		code += fmt.Sprintf("-%s", result.ASOrganization)
+	if candidate.ASOrganization != "" {
+		code += fmt.Sprintf("-%s", candidate.ASOrganization)
 	}
-	code += fmt.Sprintf("-%s", result.IP)
+	code += fmt.Sprintf("-%s", candidate.IP)
 
 	node.RegionID = int(regionID)
 

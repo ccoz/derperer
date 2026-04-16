@@ -1,87 +1,48 @@
-definitions:
-  derperer.DERPMapPolicy:
-    properties:
-      baselineBandwidth:
-        type: number
-      checkDuration:
-        $ref: '#/definitions/time.Duration'
-      recheckInterval:
-        allOf:
-        - $ref: '#/definitions/time.Duration'
-        description: RecheckInterval is the interval to recheck a abandoned node.
-      testConcurrency:
-        type: integer
-    type: object
-  derperer.DerpererConfig:
-    properties:
-      address:
-        type: string
-      adminToken:
-        type: string
-      derpmapPolicy:
-        $ref: '#/definitions/derperer.DERPMapPolicy'
-      fetchBatch:
-        type: integer
-      fetchInterval:
-        $ref: '#/definitions/time.Duration'
-      fofaClient:
-        $ref: '#/definitions/fofa.Fofa'
-    type: object
-  fofa.Fofa:
-    properties:
-      email:
-        type: string
-      key:
-        type: string
-    type: object
-  time.Duration:
-    enum:
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    type: integer
-    x-enum-varnames:
-    - minDuration
-    - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
+swagger: "2.0"
 info:
+  title: Derperer API
+  description: APIs for loading DERP candidates from result.json, exposing filtered DERP maps, and updating Tailscale ACLs.
+  version: dev
   contact: {}
 paths:
   /:
     get:
       produces:
       - text/html
-      responses: {}
       summary: Index
+      responses:
+        "200":
+          description: OK
   /admin:
     get:
+      security:
+      - BasicAuth: []
       produces:
       - text/html
-      responses: {}
-      security:
-      - BasicAuth: []
       summary: Admin Index
+      responses:
+        "200":
+          description: OK
   /admin/config:
     get:
-      produces:
-      - application/json
-      responses: {}
       security:
       - BasicAuth: []
+      produces:
+      - application/json
       summary: Get Server Config
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/derperer.DerpererConfig'
     post:
+      security:
+      - BasicAuth: []
       consumes:
       - application/json
+      produces:
+      - application/json
+      summary: Change Server Config
       parameters:
       - description: config
         in: body
@@ -89,33 +50,226 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/derperer.DerpererConfig'
-      produces:
-      - application/json
-      responses: {}
-      security:
-      - BasicAuth: []
-      summary: Change Server Config
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/derperer.DerpererConfig'
   /derp.json:
     get:
+      produces:
+      - application/json
+      summary: Get DERP Map
       parameters:
-      - description: alive|error|all
+      - type: boolean
+        description: return all regions without filtering
+        name: all
+        in: query
+      - type: string
+        description: alive|error|unknown
+        name: status
+        in: query
         enum:
         - alive
         - error
-        - all
-        in: query
-        name: status
-        type: string
-      - description: latency limit, e.g. 500ms
-        in: query
+        - unknown
+      - type: string
+        description: latency limit, e.g. 500ms
         name: latency-limit
-        type: string
-      - description: bandwidth limit, e.g. 2Mbps
         in: query
+      - type: string
+        description: bandwidth limit, e.g. 2Mbps
         name: bandwidth-limit
-        type: string
+        in: query
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/derperer.DERPMap'
+  /derp_sort.json:
+    get:
       produces:
       - application/json
-      responses: {}
-      summary: Get DERP Map
-swagger: "2.0"
+      summary: Get Top DERP Regions
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/derperer.DERPResult'
+  /update:
+    get:
+      produces:
+      - application/json
+      summary: Update Tailscale ACL
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+definitions:
+  derperer.DERPHomeParams:
+    type: object
+    properties:
+      RegionScore:
+        type: object
+        additionalProperties:
+          type: number
+  derperer.DERPMap:
+    type: object
+    properties:
+      HomeParams:
+        $ref: '#/definitions/derperer.DERPHomeParams'
+      Regions:
+        type: object
+        additionalProperties:
+          $ref: '#/definitions/derperer.DERPRegion'
+      OmitDefaultRegions:
+        type: boolean
+  derperer.DERPMapPolicy:
+    type: object
+    properties:
+      baselineBandwidth:
+        type: number
+      checkDuration:
+        $ref: '#/definitions/time.Duration'
+      recheckInterval:
+        $ref: '#/definitions/time.Duration'
+      testConcurrency:
+        type: integer
+        format: int32
+  derperer.DERPNode:
+    type: object
+    properties:
+      Name:
+        type: string
+      RegionID:
+        type: integer
+        format: int32
+      HostName:
+        type: string
+      CertName:
+        type: string
+      IPv4:
+        type: string
+      IPv6:
+        type: string
+      STUNPort:
+        type: integer
+        format: int32
+      STUNOnly:
+        type: boolean
+      DERPPort:
+        type: integer
+        format: int32
+      InsecureForTests:
+        type: boolean
+      STUNTestIP:
+        type: string
+      CanPort80:
+        type: boolean
+  derperer.DERPNodeR:
+    type: object
+    properties:
+      Name:
+        type: string
+      RegionID:
+        type: integer
+        format: int32
+      HostName:
+        type: string
+      CertName:
+        type: string
+      IPv4:
+        type: string
+      IPv6:
+        type: string
+      STUNPort:
+        type: integer
+        format: int32
+      STUNOnly:
+        type: boolean
+      DERPPort:
+        type: integer
+        format: int32
+      InsecureForTests:
+        type: boolean
+      STUNTestIP:
+        type: string
+      CanPort80:
+        type: boolean
+  derperer.DERPRegion:
+    type: object
+    properties:
+      RegionID:
+        type: integer
+        format: int32
+      RegionCode:
+        type: string
+      RegionName:
+        type: string
+      Avoid:
+        type: boolean
+      Nodes:
+        type: array
+        items:
+          $ref: '#/definitions/derperer.DERPNode'
+      Bandwidth:
+        type: string
+      Latency:
+        type: string
+      Error:
+        type: string
+      Status:
+        type: integer
+        format: int32
+  derperer.DERPRegionR:
+    type: object
+    properties:
+      RegionID:
+        type: integer
+        format: int32
+      RegionCode:
+        type: string
+      RegionName:
+        type: string
+      Avoid:
+        type: boolean
+      Nodes:
+        type: array
+        items:
+          $ref: '#/definitions/derperer.DERPNodeR'
+  derperer.DERPResult:
+    type: object
+    properties:
+      Regions:
+        type: object
+        additionalProperties:
+          $ref: '#/definitions/derperer.DERPRegionR'
+  derperer.DerpererConfig:
+    type: object
+    properties:
+      address:
+        type: string
+      adminToken:
+        type: string
+      fetchInterval:
+        $ref: '#/definitions/time.Duration'
+      derpMapPolicy:
+        $ref: '#/definitions/derperer.DERPMapPolicy'
+      dataPath:
+        type: string
+      account:
+        type: string
+      apiKey:
+        type: string
+      updateInterval:
+        $ref: '#/definitions/time.Duration'
+      deleteInterval:
+        $ref: '#/definitions/time.Duration'
+  time.Duration:
+    type: integer
+    format: int64
+    description: Duration encoded as nanoseconds.
+securityDefinitions:
+  BasicAuth:
+    type: basic

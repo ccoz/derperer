@@ -33,13 +33,17 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 
 	serverCmd.Flags().Duration("config.FetchInterval", 24*time.Hour, "fetch interval")
+	serverCmd.Flags().Duration("config.UpdateInterval", 4*time.Hour, "tailscale update interval")
+	serverCmd.Flags().Duration("config.DeleteInterval", 24*time.Hour, "refresh interval")
 	serverCmd.Flags().String("config.Address", ":8080", "address")
-	serverCmd.Flags().Duration("config.DERPMapPolicy.RecheckInterval", time.Hour, "update interval")
+	serverCmd.Flags().Duration("config.DERPMapPolicy.RecheckInterval", time.Hour, "recheck interval")
 	serverCmd.Flags().Duration("config.DERPMapPolicy.CheckDuration", 5*time.Second, "check duration")
 	serverCmd.Flags().Float64("config.DERPMapPolicy.BaselineBandwidth", 2, "bandwidth limit, unit: Mbps")
 	serverCmd.Flags().Int("config.DERPMapPolicy.TestConcurrency", 4, "test concurrency")
 	serverCmd.Flags().String("config.AdminToken", "", "admin token")
 	serverCmd.Flags().String("config.DataPath", "./data", "data path")
+	serverCmd.Flags().String("config.Account", "", "tailscale tailnet account")
+	serverCmd.Flags().String("config.ApiKey", "", "tailscale api key")
 
 	viper.BindPFlags(serverCmd.Flags())
 }
